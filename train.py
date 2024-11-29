@@ -1,53 +1,71 @@
-import logging
 import os
-import random
-import time
-import argparse
-
 import torch
-import hydra
-import copick
-from omegaconf import OmegaConf
+import mlflow
+import mlflow.pytorch
+from monai.data import decollate_batch
 
-from datasets import CryoETDataset
-logger = logging.getLogger(__name__)
+def train(
+    model, train_loader, val_loader, post_pred, post_label, output_dir, eval_frequency=2, max_epochs=100, device="cuda",
+):
+    best_metric = -1
+    best_metric_epoch = -1
+    epoch_loss_values = []
+    metric_values = []
 
-@hydra.main(version_base=None, config_path="configs", config_name="")
-def train(config):
-    # --------------------- Load configs ---------------------
-    cfg = OmegaConf.to_container(config, resolve=True)
+    for epoch in range(max_epochs):
+        print("-" * 10)
+        print(f"epoch {epoch + 1}/{max_epochs}")
+        model.train()
+        epoch_loss = 0
+        step = 0
 
-    # --------------------- Setup logger ---------------------
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO
-    )
+        for batch_data in train_loader:
+            step += 1
+            inputs = batch_data["image"].to(device)
+            labels = batch_data["label"].to(device)
+            model.optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = model.loss_function(outputs, labels)
+            loss.backward()
+            model.optimizer.step()
+            epoch_loss += loss.item()
+            print(f"batch {step}/{len(train_loader)}, " f"train_loss: {loss.item():.4f}")
 
-    def print_line():
-        prefix, unit, suffix = "#", "~~", "#"
-        logger.info(prefix + unit*50 + suffix)
+        epoch_loss /= step
+        epoch_loss_values.append(epoch_loss)
+        print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+        mlflow.log_metric("train_loss", epoch_loss, step=epoch+1)
 
-    # --------------------- Seed configs ---------------------
-    print_line()
-    logger.info("Seed: {}".format(cfg['seed']))
-    
-    # --------------------- Load data ---------------------
-    print_line()
-    logger.info("Loading data...")
-    root = copick.from_file(cfg['config_blob'])
+        if (epoch + 1) % eval_frequency == 0:
+            model.eval()
+            with torch.no_grad():
+                for val_data in val_loader:
+                    val_inputs = val_data["image"].to(device)
+                    val_labels = val_data["label"].to(device)
+                    val_outputs = model(val_inputs)
+                    metric_val_outputs = [post_pred(i) for i in decollate_batch(val_outputs)]
+                    metric_val_labels = [post_label(i) for i in decollate_batch(val_labels)]
+                    
+                    # compute metric for current iteration
+                    model.metrics_function(y_pred=metric_val_outputs, y=metric_val_labels)
 
-    print(cfg['config_blob'])
+                metrics = model.metrics_function.aggregate(reduction="mean_batch")
+                metric_per_class = ["{:.4g}".format(x) for x in metrics]
+                metric = torch.mean(metrics).numpy(force=True)
+                mlflow.log_metric("validation metric", metric, step=epoch+1)
+                for i,m in enumerate(metrics):
+                    mlflow.log_metric(f"validation metric class {i+1}", m, step=epoch+1)
+                model.metrics_function.reset()
 
-    dataset = CryoETDataset(root, voxel_size=10, tomo_type="denoised")
-    train_loader, val_loader = dataset.get_dataloaders(train_batch_size=2, val_batch_size=2)
-    
-
-
-
-
-if __name__ == "__main__":
-    train()
-    
-    
-
+                metric_values.append(metric)
+                if metric > best_metric:
+                    best_metric = metric
+                    best_metric_epoch = epoch + 1
+                    torch.save(model.state_dict(), os.path.join(output_dir, "best_metric_model.pth"))
+                    
+                    print("saved new best metric model")
+                print(
+                    f"current epoch: {epoch + 1} current mean recall per class: {', '.join(metric_per_class)}"
+                    f"\nbest mean recall: {best_metric:.4f} "
+                    f"at epoch: {best_metric_epoch}"
+                )

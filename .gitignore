@@ -166,3 +166,5 @@ resources/
 data/
 notebooks/
 outputs/
+mlruns/
+models/

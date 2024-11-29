@@ -94,9 +94,6 @@ class CryoETDataset:
                 is_multilabel=True
             )[0].numpy()
             self.data_dicts.append({"image": tomogram, "label": segmentation})
-        
-        print("Unique labels: ", np.unique(self.data_dicts[0]['label']))
-        print("Unique labels across all data: ", np.unique([data['label'] for data in self.data_dicts]))
 
     def _split_data(self):
         """Splits the dataset into training and validation sets."""
@@ -143,5 +140,8 @@ class CryoETDataset:
             num_workers=num_workers,
             pin_memory=torch.cuda.is_available()
         )
+
+        print("len train_loader: ", len(train_loader))
+        print("len ds: ", len(train_ds))
 
         return train_loader, val_loader

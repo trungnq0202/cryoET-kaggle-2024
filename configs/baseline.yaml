@@ -8,7 +8,7 @@ model:
 
 train_params:
   epochs: 200
-  eval_frequency: 100
+  eval_frequency: 2
   patience: 20
 
 optimizer:

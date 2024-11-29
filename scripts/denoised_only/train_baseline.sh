@@ -1,1 +1,1 @@
-python train.py --config-name baseline
+python run.py --config-name baseline
