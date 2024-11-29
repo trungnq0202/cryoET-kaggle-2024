@@ -85,7 +85,7 @@ class CryoETDataset:
                             target_objects[pickable_object.name]['radius'] * 0.8,
                             target_objects[pickable_object.name]['label']
                         )
-        write.segmentation(run, target, self.copick_user_name, name=self.copick_segmentation_name)
+                write.segmentation(run, target, self.copick_user_name, name=self.copick_segmentation_name)
 
     def _prepare_data_dicts(self):
         """Prepares the data dictionaries by loading tomograms and segmentations."""

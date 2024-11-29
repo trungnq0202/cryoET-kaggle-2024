@@ -18,4 +18,4 @@ optimizer:
 outputs:
   model_dir: models/baseline
 
-config_blob: configs/config_blob.json
+config_blob: configs/config_blob_v1.0.json
