@@ -5,18 +5,14 @@ from collections import defaultdict
 
 import torch
 from monai.data import Dataset, CacheDataset, DataLoader
-from monai.transforms import (
-    Compose, 
-    EnsureChannelFirstd, 
-    Orientationd,  
-    NormalizeIntensityd, 
-    RandFlipd, 
-    RandRotate90d, 
-    RandCropByLabelClassesd
-)
 from copick_utils.segmentation import segmentation_from_picks
 import copick_utils.writers.write as write
 
+from transforms import (
+    get_non_random_transforms, 
+    get_random_transforms, 
+    get_validation_transforms
+)
 
 class CryoETDataset:
     def __init__(
@@ -98,40 +94,15 @@ class CryoETDataset:
                 is_multilabel=True
             )[0].numpy()
             self.data_dicts.append({"image": tomogram, "label": segmentation})
+        
+        print("Unique labels: ", np.unique(self.data_dicts[0]['label']))
+        print("Unique labels across all data: ", np.unique([data['label'] for data in self.data_dicts]))
 
     def _split_data(self):
         """Splits the dataset into training and validation sets."""
         num_train = int(len(self.data_dicts) * self.train_split)
         self.train_files = self.data_dicts[:num_train]
         self.val_files = self.data_dicts[num_train:]
-
-    def get_transforms(self, random=False):
-        """Creates data transforms.
-
-        Args:
-            random (bool): Whether to include random augmentations.
-
-        Returns:
-            Compose: A MONAI Compose object with the desired transformations.
-        """
-        transforms = [
-            EnsureChannelFirstd(keys=["image", "label"]),
-            NormalizeIntensityd(keys="image"),
-            Orientationd(keys=["image", "label"], axcodes="RAS"),
-        ]
-        if random:
-            transforms += [
-                RandCropByLabelClassesd(
-                    keys=["image", "label"],
-                    label_key="label",
-                    spatial_size=self.spatial_size,
-                    num_classes=self.num_classes,
-                    num_samples=self.num_samples,
-                ),
-                RandRotate90d(keys=["image", "label"], prob=0.5, spatial_axes=[0, 2]),
-                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-            ]
-        return Compose(transforms)
 
     def get_dataloaders(self, train_batch_size=1, val_batch_size=1, num_workers=4):
         """Creates dataloaders for training and validation datasets.
@@ -145,8 +116,12 @@ class CryoETDataset:
             tuple: Training and validation DataLoader objects.
         """
         # Training dataset and DataLoader
-        train_ds = CacheDataset(data=self.train_files, transform=self.get_transforms(), cache_rate=1.0)
-        train_ds = Dataset(data=train_ds, transform=self.get_transforms(random=True))
+        train_ds = CacheDataset(
+            data=self.train_files, 
+            transform=get_non_random_transforms(), 
+            cache_rate=1.0
+        )
+        train_ds = Dataset(data=train_ds, transform=get_random_transforms(self.num_samples))
         train_loader = DataLoader(
             train_ds,
             batch_size=train_batch_size,
@@ -156,7 +131,11 @@ class CryoETDataset:
         )
 
         # Validation dataset and DataLoader
-        val_ds = CacheDataset(data=self.val_files, transform=self.get_transforms(), cache_rate=1.0)
+        val_ds = CacheDataset(
+            data=self.val_files, 
+            transform=get_validation_transforms(self.num_samples), 
+            cache_rate=1.0
+        )
         val_loader = DataLoader(
             val_ds,
             batch_size=val_batch_size,

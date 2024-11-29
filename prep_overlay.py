@@ -6,7 +6,7 @@ import shutil
 def prepare_config_blob(args):
     full_data_dir = os.path.join(os.path.abspath(args.data_dir), "train/static")
     full_new_overlay_dir = os.path.abspath(args.new_overlay_dir)
-    
+
     config_blob = f"""{{
         "name": "czii_cryoet_mlchallenge_2024",
         "description": "2024 CZII CryoET ML Challenge training data.",
@@ -85,9 +85,12 @@ def prepare_config_blob(args):
     
 
 def prepare_overlay_data(args):
-    for root, dirs, files in os.walk(args.data_dir):
-        relative_path = os.path.relpath(root, args.data_dir)
-        target_dir = os.path.join(args.new_overlay_dir, relative_path)
+    source_dir = os.path.join(args.data_dir, "train/overlay")
+    destination_dir = args.new_overlay_dir
+
+    for root, dirs, files in os.walk(source_dir):
+        relative_path = os.path.relpath(root, source_dir)
+        target_dir = os.path.join(destination_dir, relative_path)
         os.makedirs(target_dir, exist_ok=True)
 
         for file in files:
