@@ -48,7 +48,7 @@ def run(config):
 
     dataset = CryoETDataset(root, voxel_size=10, tomo_type="denoised")
     train_loader, val_loader = dataset.get_dataloaders(train_batch_size=1, val_batch_size=1)
-    
+    logger.info(f"Number of classes: {len(root.pickable_objects)+1}")
 
     # --------------------- Load model ---------------------
     model = CryoETUNet(

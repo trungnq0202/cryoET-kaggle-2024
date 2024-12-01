@@ -12,9 +12,6 @@ from monai.transforms import (
 def get_random_transforms(n_samples):
     """Creates data transforms.
 
-    Args:
-        random (bool): Whether to include random augmentations.
-
     Returns:
         Compose: A MONAI Compose object with the desired transformations.
     """
