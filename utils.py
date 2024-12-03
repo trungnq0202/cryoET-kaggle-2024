@@ -140,3 +140,23 @@ def create_dir(dir):
 def create_multiple_dirs(dir_list):
     for dir in dir_list:
         create_dir(dir)
+
+
+def dict_to_df(coord_dict, experiment_name):
+    all_coords = []
+    all_labels = []
+
+    for label, coord in coord_dict.items():
+        all_coords.append(coord)
+        all_labels.extend([label]*len(coord))
+
+    all_coords = np.vstack(all_coords)
+
+    df = pd.DataFrame({
+        'experiment': [experiment_name]*len(all_coords),
+        'particle_type': all_labels,
+        'x': all_coords[:, 0],
+        'y': all_coords[:, 1],
+        'z': all_coords[:, 2],
+    })
+    return df

@@ -1,147 +1,90 @@
-import os
-import numpy as np
+import lightning as pl
+from transforms import (get_non_random_transforms, get_random_transforms)
+import copick
 from tqdm import tqdm
 from collections import defaultdict
-
-import torch
-from monai.data import Dataset, CacheDataset, DataLoader
 from copick_utils.segmentation import segmentation_from_picks
 import copick_utils.writers.write as write
+import numpy as np
+from monai.data import CacheDataset, DataLoader, Dataset
 
-from transforms import (
-    get_non_random_transforms, 
-    get_random_transforms, 
-    get_validation_transforms
-)
+class CryoETDataset(pl.LightningDataModule):
 
-class CryoETDataset:
-    def __init__(
-        self,
-        root,
-        voxel_size=10,
-        tomo_type="denoised",
-        copick_user_name="copickUtils",
-        copick_segmentation_name="paintedPicks",
-        generate_masks=True,
-        num_classes=8,
-        train_split=0.8,
-        spatial_size=(96, 96, 96),
-        num_samples=16,
-    ):
-        """
-        Initializes the CryoETDataset class with the given parameters.
+    def __init__(self,
+                 copick_config_path,
+                 train_batch_size,
+                 val_batch_size,
+                 num_training_dataset,
+                 spatial_size = [96,96,96],
+                 num_samples=16,
+                 copick_segmentation_name="paintedPicks",
+                 copick_user_name="copickUtils",
+                 voxel_size=10,
+                 tomo_type="denoised",
+                 generate_masks=True):
 
-        Args:
-            root (object): The root object from the dataset (e.g., from CoPick).
-            voxel_size (int): The voxel size for tomogram data.
-            tomo_type (str): The type of tomogram (e.g., "denoised").
-            copick_user_name (str): User name for segmentation generation.
-            copick_segmentation_name (str): Name for segmentation mask.
-            num_classes (int): Number of label classes for segmentation.
-            train_split (float): Proportion of the dataset used for training.
-            spatial_size (tuple): Dimensions for cropping data.
-            num_samples (int): Number of samples for random crops.
-        """
-        self.root = root
+        super().__init__()
+        self.train_batch_size = train_batch_size
+        self.val_batch_size = val_batch_size
+        self.root = copick.from_file(copick_config_path)
+        self.copick_segmentation_name = copick_segmentation_name
+        self.copick_user_name = copick_user_name
         self.voxel_size = voxel_size
         self.tomo_type = tomo_type
-        self.copick_user_name = copick_user_name
-        self.copick_segmentation_name = copick_segmentation_name
-        self.num_classes = num_classes
-        self.train_split = train_split
-        self.spatial_size = spatial_size
-        self.num_samples = num_samples
-        self.generate_masks = generate_masks
-        self.data_dicts = []
-        self.train_files = []
-        self.val_files = []
-        self._generate_mask()
-        self._prepare_data_dicts()
-        self._split_data()
+        self.classes_num = len(self.root.pickable_objects) + 1
+        if generate_masks:
+            self._generate_mask()
+        self.non_random_transforms = get_non_random_transforms()
+        self.random_transforms = get_random_transforms(spatial_size, self.classes_num, num_samples)
+        self.data_dicts = self._data_from_copick()
+        self.train_dicts = self.data_dicts[:num_training_dataset]
+        self.val_dicts = self.data_dicts[num_training_dataset:]
 
-    def _generate_mask(self):
-        if self.generate_masks:
-            target_objects = defaultdict(dict)
-            for object in self.root.pickable_objects:
-                if object.is_particle:
-                    target_objects[object.name]['label'] = object.label
-                    target_objects[object.name]['radius'] = object.radius
+    def setup(self, stage):
+        self.train_ds = CacheDataset(data=self.train_dicts, transform=self.non_random_transforms, cache_rate=1.0)
+        self.train_ds = Dataset(data=self.train_ds, transform=self.random_transforms)
+        self.val_ds = CacheDataset(data=self.val_dicts, transform=self.non_random_transforms, cache_rate=1.0)
+        self.val_ds = Dataset(data=self.val_ds, transform=self.random_transforms)
 
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=self.train_batch_size, shuffle=True, num_workers=1,
+                          persistent_workers=False)
 
-            for run in tqdm(self.root.runs):
-                tomo = run.get_voxel_spacing(10)
-                tomo = tomo.get_tomogram(self.tomo_type).numpy()
-                target = np.zeros(tomo.shape, dtype=np.uint8)
-                for pickable_object in self.root.pickable_objects:
-                    pick = run.get_picks(object_name=pickable_object.name, user_id="curation")
-                    if len(pick):  
-                        target = segmentation_from_picks.from_picks(
-                            pick[0], 
-                            target, 
-                            target_objects[pickable_object.name]['radius'] * 0.8,
-                            target_objects[pickable_object.name]['label']
-                        )
-                write.segmentation(run, target, self.copick_user_name, name=self.copick_segmentation_name)
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=self.val_batch_size, shuffle=False, num_workers=15,
+                          persistent_workers=True)
 
-    def _prepare_data_dicts(self):
-        """Prepares the data dictionaries by loading tomograms and segmentations."""
-        for run in tqdm(self.root.runs, desc="Preparing Data Dicts"):
+    def _data_from_copick(self):
+        data_dict = []
+        for run in tqdm(self.root.runs):
             tomogram = run.get_voxel_spacing(self.voxel_size).get_tomogram(self.tomo_type).numpy()
             segmentation = run.get_segmentations(
                 name=self.copick_segmentation_name,
                 user_id=self.copick_user_name,
                 voxel_size=self.voxel_size,
-                is_multilabel=True
+                is_multilabel=True,
             )[0].numpy()
-            self.data_dicts.append({"image": tomogram, "label": segmentation})
+            data_dict.append({'image': tomogram, 'label': segmentation})
+        return data_dict
 
-    def _split_data(self):
-        """Splits the dataset into training and validation sets."""
-        num_train = int(len(self.data_dicts) * self.train_split)
-        self.train_files = self.data_dicts[:num_train]
-        self.val_files = self.data_dicts[num_train:]
+    def _generate_mask(self):
+        target_objects = defaultdict(dict)
+        for obj in self.root.pickable_objects:
+            if obj.is_particle:
+                target_objects[obj.name]["label"] = obj.label
+                target_objects[obj.name]["radius"] = obj.radius
+        for run in tqdm(self.root.runs):
+            tomo = run.get_voxel_spacing(10)
+            tomo = tomo.get_tomogram(self.tomo_type).numpy()
+            target = np.zeros(tomo.shape, dtype=np.uint8)
+            for pickable_object in self.root.pickable_objects:
+                pick = run.get_picks(object_name=pickable_object.name, user_id="curation")
 
-    def get_dataloaders(self, train_batch_size=1, val_batch_size=1, num_workers=4):
-        """Creates dataloaders for training and validation datasets.
-
-        Args:
-            train_batch_size (int): Batch size for training.
-            val_batch_size (int): Batch size for validation.
-            num_workers (int): Number of workers for DataLoader.
-
-        Returns:
-            tuple: Training and validation DataLoader objects.
-        """
-        # Training dataset and DataLoader
-        train_ds = CacheDataset(
-            data=self.train_files, 
-            transform=get_non_random_transforms(), 
-            cache_rate=1.0
-        )
-        train_ds = Dataset(data=train_ds, transform=get_random_transforms(self.num_samples))
-        train_loader = DataLoader(
-            train_ds,
-            batch_size=train_batch_size,
-            shuffle=True,
-            num_workers=num_workers,
-            pin_memory=torch.cuda.is_available()
-        )
-
-        # Validation dataset and DataLoader
-        val_ds = CacheDataset(
-            data=self.val_files, 
-            transform=get_validation_transforms(self.num_samples), 
-            cache_rate=1.0
-        )
-        val_loader = DataLoader(
-            val_ds,
-            batch_size=val_batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=torch.cuda.is_available()
-        )
-
-        print("len train_loader: ", len(train_loader))
-        print("len ds: ", len(train_ds))
-
-        return train_loader, val_loader
+                if len(pick):
+                    target = segmentation_from_picks.from_picks(
+                        pick[0],
+                        target,
+                        target_objects[pickable_object.name]["radius"] * 0.8,
+                        target_objects[pickable_object.name]["label"],
+                    )
+            write.segmentation(run, target, self.copick_user_name, name=self.copick_segmentation_name)
