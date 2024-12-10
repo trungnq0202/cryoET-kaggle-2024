@@ -1,0 +1,27 @@
+seed: 32
+use_mlflow: True
+data_dir: data/czii-cryo-et-object-identification/train
+
+model:
+  backbone: UNet
+  num_classes: 6
+
+train_params:
+  epochs: 1000
+  eval_frequency: 2
+  patience: 20
+  channels: [64,128,256,512]
+  strides: [2,2,1]
+  num_res_units: 2
+  alpha: 0.9
+  beta: 0.1
+
+
+optimizer:
+  name: AdamW
+  lr: 1e-3
+
+outputs:
+  model_dir: models/baseline
+
+config_blob: configs/config_blob_v1.0.json

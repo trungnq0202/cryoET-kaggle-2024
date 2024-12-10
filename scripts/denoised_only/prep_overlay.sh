@@ -1,1 +1,1 @@
-python prep_overlay.py --data_dir data/czii-cryo-et-object-identification --new_overlay_dir data/overlay_v1.0 --config_blob_dir configs/config_blob_v1.0.json
+python prep_overlay.py --data_dir home/xie.chang/cryo_kaggle/czii-cryo-et-object-identification --new_overlay_dir data/overlay_v1.0 --config_blob_dir configs/config_blob_v1.0.json

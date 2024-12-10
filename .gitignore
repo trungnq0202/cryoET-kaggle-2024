@@ -168,3 +168,10 @@ notebooks/
 outputs/
 mlruns/
 models/
+lightning_logs/
+checkpoints/
+loadData.py
+helper.py
+test.py
+kaggle/
+generate*.py

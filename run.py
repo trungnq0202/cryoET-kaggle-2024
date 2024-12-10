@@ -36,24 +36,29 @@ def run(config):
     # --------------------- Load data ---------------------
     print_line()
     logger.info("Loading data...")
+    source_dir = "/home/xie.chang/cryo_kaggle/czii-cryo-et-object-identification/train/overlay"
+    destination_dir = "/home/xie.chang/cryoET-kaggle-2024/data/train/overlay_v1.0"
+    CryoETDataset.copy_from_source(source_dir, destination_dir)
     dataset = CryoETDataset(
         cfg['config_blob'],
         train_batch_size=1,
-        val_batch_size=16,
-        num_training_dataset=5,
-        generate_masks=False)
+        val_batch_size=2,
+        num_training_dataset=6)
 
     # --------------------- Load model ---------------------
     model = Model(
         spatial_dims=3,
         in_channels=1,
         out_channels=7,
-        channels=(48, 64, 80, 80),
-        strides=(2, 2, 1),
-        num_res_units=1,
-        lr=cfg['optimizer']['lr']
+        channels=cfg['train_params']['channels'],
+        strides=cfg['train_params']['strides'],
+        num_res_units=cfg['train_params']['num_res_units'],
+        lr=cfg['optimizer']['lr'],
+        beta=cfg['train_params']['alpha'],
+        alpha=cfg['train_params']['beta']
     )
-
+    
+    # logger.info(model.parameters)
     # --------------------- Train model ---------------------
 
     torch.set_float32_matmul_precision("medium")
@@ -62,7 +67,7 @@ def run(config):
         dirpath="checkpoints/",
         filename="best_model",
         save_top_k=1,
-        mode="min",
+        mode="max",
     )
     trainer = pl.Trainer(
         max_epochs=cfg['train_params']['epochs'],
@@ -78,10 +83,16 @@ def run(config):
     with mlflow.start_run():
         params = {
             "epochs": cfg['train_params']['epochs'],
+            "channels": cfg['train_params']['channels'],
+            "strides": cfg['train_params']['strides'],
+            "num_res_units": cfg['train_params']['num_res_units'],
             "learning_rate": cfg['optimizer']['lr'],
+            "alpha": cfg['train_params']['alpha'],
+            "beta": cfg['train_params']['beta'],
             "loss_function": model.loss_fn.__class__.__name__,
             "metric_function": model.metric_fn.__class__.__name__,
             "optimizer": "Adam",
+
         }
         # Log training parameters.
         mlflow.log_params(params)
@@ -96,7 +107,7 @@ def run(config):
         trainer.fit(model, dataset)
 
         # Save the trained model to MLflow.
-        mlflow.pytorch.log_model(model, "baseline_model")
+        mlflow.pytorch.log_model(model, "baseline_model_v1")
 
 
 if __name__ == "__main__":

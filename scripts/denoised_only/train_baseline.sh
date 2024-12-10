@@ -1,1 +1,1 @@
-python run.py --config-name baseline
+python run.py --config-name baseline_v3
