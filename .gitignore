@@ -175,3 +175,4 @@ helper.py
 test.py
 kaggle/
 generate*.py
+submission*.csv
